@@ -5,34 +5,36 @@ A data strucutre holding indices for various columns of a table. Key column shou
 class Index:
 
     def __init__(self, table):
-        # One index for each table. All our empty initially.
+        self.table = table
         self.indices = [None] *  table.num_columns
-        pass
-
+        self.create_index(self.table.key)
     """
     # returns the location of all records with the given value on column "column"
     """
-
     def locate(self, column, value):
-        pass
-
+      if self.indices[column] is None or value not in self.indices[column]:
+          return []
+      return self.indices[column][value]
     """
     # Returns the RIDs of all records with values in column "column" between "begin" and "end"
     """
-
     def locate_range(self, begin, end, column):
-        pass
-
+      search_results = []
+      if self.indices[column] is None:
+          return search_results
+      for value in self.indices[column]:
+          if begin <= value <= end:
+              search_results.extend(self.indices[column][value])
+              
+      return search_results
     """
     # optional: Create index on specific column
     """
-
     def create_index(self, column_number):
-        pass
-
+        if self.indices[column_number] is None:
+            self.indices[column_number] = {}
     """
     # optional: Drop index of specific column
     """
-
     def drop_index(self, column_number):
-        pass
+      self.indices[column_number] = None
