@@ -31,7 +31,7 @@ for i in range(0, number_of_records):
 
     records[key] = [key, randint(0, 20), randint(0, 20), randint(0, 20), randint(0, 20)]
     query.insert(*records[key])
-    # print('inserted', records[key])
+    print('inserted', records[key])
 print("Insert finished")
 
 # Check inserted records using select query
@@ -46,8 +46,7 @@ for key in records:
     if error:
         print('select error on', key, ':', record, ', correct:', records[key])
     else:
-        pass
-        # print('select on', key, ':', record)
+        print('select on', key, ':', record)
 
 for key in records:
     updated_columns = [None, None, None, None, None]
@@ -68,8 +67,7 @@ for key in records:
         if error:
             print('update error on', original, 'and', updated_columns, ':', record, ', correct:', records[key])
         else:
-            pass
-            # print('update on', original, 'and', updated_columns, ':', record)
+            print('update on', original, 'and', updated_columns, ':', record)
         updated_columns[i] = None
 
 keys = sorted(list(records.keys()))
@@ -83,5 +81,4 @@ for c in range(0, grades_table.num_columns):
         if column_sum != result:
             print('sum error on [', keys[r[0]], ',', keys[r[1]], ']: ', result, ', correct: ', column_sum)
         else:
-            pass
-            # print('sum on [', keys[r[0]], ',', keys[r[1]], ']: ', column_sum)
+            print('sum on [', keys[r[0]], ',', keys[r[1]], ']: ', column_sum)

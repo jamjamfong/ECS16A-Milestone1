@@ -73,7 +73,7 @@ class Query:
             results = []
             for rid in rids:
                 data = self.table.get_record_data(rid, projected_columns_index)
-                if data:
+                if data is not None:
                     actual_pk = self.table.get_column_value(rid, self.table.key)
                     results.append(Record(rid, actual_pk, data))
             return results

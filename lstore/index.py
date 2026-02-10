@@ -38,3 +38,18 @@ class Index:
     """
     def drop_index(self, column_number):
       self.indices[column_number] = None
+      
+    def insert_key(self, value, rid):
+        column = self.table.key
+        
+        if self.indices[column] is None:
+            self.create_index(column)
+        
+        if value not in self.indices[column]:
+            self.indices[column][value] = []
+        
+        self.indices[column][value].append(rid)
+        
+    def remove_key(self, column, value):
+        if self.indices[column] is not None and value in self.indices[column]:
+            del self.indices[column][value]
