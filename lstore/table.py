@@ -237,8 +237,6 @@ class Table:
                 signed=True
             )
         
-        # For version -1: skip 1 tail record (go to version before latest)
-        # For version -2: skip 2 tail records
         target_version_index = abs(relative_version)
         
         # If we don't have enough versions, return base
@@ -298,8 +296,8 @@ class Table:
                 schema_encoding[i] = '1'
         schema_encoding_str = ''.join(schema_encoding)
         
-        current_tail_range[INDIRECTION_COLUMN].write(current_indirection)  # Point to previous version
-        current_tail_range[RID_COLUMN].write(rid)  # Original base RID
+        current_tail_range[INDIRECTION_COLUMN].write(current_indirection)
+        current_tail_range[RID_COLUMN].write(rid)
         current_tail_range[TIMESTAMP_COLUMN].write(int(time()))
         current_tail_range[SCHEMA_ENCODING_COLUMN].write(int(schema_encoding_str, 2))
         

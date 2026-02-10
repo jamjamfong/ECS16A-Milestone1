@@ -22,7 +22,6 @@ class Query:
     """
     def delete(self, primary_key):
         try:
-            # Fixed: Changed variable name to 'rids' to match the logic below
             rids = self.table.index.locate(self.table.key, primary_key)
             if not rids or len(rids) == 0:
                 return False
@@ -134,11 +133,9 @@ class Query:
         try:
             total = 0
             found = False
-            # Iterate through the range of keys [cite: 161]
             for key in range(start_range, end_range + 1):
                 rid = self.table.index.locate(self.table.key, key)
                 if rid:
-                    # Sum values from the specified column [cite: 134]
                     val = self.table.get_column_value(rid, aggregate_column_index)
                     total += val
                     found = True
@@ -163,7 +160,6 @@ class Query:
             for key in range(start_range, end_range + 1):
                 rid = self.table.index.locate(self.table.key, key)
                 if rid:
-                    # Version-aware aggregation [cite: 30]
                     val = self.table.get_version_column_value(rid, aggregate_column_index, relative_version)
                     total += val
                     found = True
