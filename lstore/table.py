@@ -125,7 +125,8 @@ class Table:
             )
             
             # Convert to binary string and check column bit
-            schema_bits = format(schema_encoding, f'0{self.num_columns}b')
+            schema_bits = format(schema_encoding, f'0{self.num_columns}b')[::-1] # Fix bit order
+            # schema_bits = format(schema_encoding, f'0{self.num_columns}b')
             if schema_bits[column_index] == '1':
                 # This tail record has the update
                 return int.from_bytes(
@@ -297,7 +298,7 @@ class Table:
         schema_encoding_str = ''.join(schema_encoding)
         
         current_tail_range[INDIRECTION_COLUMN].write(current_indirection)
-        current_tail_range[RID_COLUMN].write(rid)
+        current_tail_range[RID_COLUMN].write(tail_rid)
         current_tail_range[TIMESTAMP_COLUMN].write(int(time()))
         current_tail_range[SCHEMA_ENCODING_COLUMN].write(int(schema_encoding_str, 2))
         
@@ -312,7 +313,11 @@ class Table:
                 prev_val = self._get_latest_column_value(rid, i, current_indirection, base_page_range, base_record_index)
                 current_tail_range[4 + i].write(prev_val)
         
-        page_range[INDIRECTION_COLUMN].data[offset:offset + 8] = tail_rid.to_bytes(8, byteorder='little', signed=True)
+        # Base record indirection is updated not the tail record's indirection
+        base_offset = base_record_index * 8
+        base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset + 8] = tail_rid.to_bytes(8, byteorder='little', signed=True)
+        
+        #page_range[INDIRECTION_COLUMN].data[offset:offset + 8] = tail_rid.to_bytes(8, byteorder='little', signed=True)
         
         tail_page_range_index = len(self.tail_pages) - 1
         tail_record_index = current_tail_range[0].num_records - 1
