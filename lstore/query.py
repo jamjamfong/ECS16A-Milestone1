@@ -112,6 +112,11 @@ class Query:
     """
     def update(self, primary_key, *columns):
         try:
+            if len(columns) != self.table.num_columns:
+                return False
+            if columns[self.table.key] is not None:
+                return False
+
             rids = self.table.index.locate(self.table.key, primary_key)
             if not rids or len(rids) == 0:
                 return False

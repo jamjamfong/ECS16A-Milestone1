@@ -230,6 +230,10 @@ class Table:
     def update_record(self, rid, columns):
         if rid not in self.page_directory:
             return False
+        if len(columns) != self.num_columns:
+            return False
+        if columns[self.key] is not None:
+            return False
 
         base_location = self.page_directory[rid]
         record_type, base_page_range_index, base_record_index = base_location
@@ -245,7 +249,6 @@ class Table:
         )
 
         columns = list(columns)
-        columns[self.key] = None  # PK cannot be updated
 
         # Compute schema encoding
         schema_bits = ['0'] * self.num_columns
