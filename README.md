@@ -6,6 +6,6 @@
 
 **Egnegt** 
 
-**Maisie** 
+**Maisie** 9% I wrote the initial query.py file.
 
 **Tess** 
