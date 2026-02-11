@@ -142,7 +142,7 @@ class Table:
                 signed=True
             )
         
-        # No update found in tail, read from base
+        # No tail in the chain updated this column, fall back to base
         offset = base_record_index * 8
         return int.from_bytes(
             base_page_range[4 + column_index].data[offset:offset + 8],
@@ -217,7 +217,41 @@ class Table:
         
         # Version 0 means latest
         if relative_version == 0:
-            return self._get_latest_column_value(rid, column_index, indirection, base_page_range, record_index)
+            # version 0 = latest, traverse tail chain respecting schema bits
+            current_tail_rid = indirection
+            while current_tail_rid != 0:
+                if current_tail_rid not in self.page_directory:
+                    break
+                tail_location = self.page_directory[current_tail_rid]
+                _, tail_page_range_index, tail_record_index = tail_location
+                tail_page_range = self.tail_pages[tail_page_range_index]
+                tail_offset = tail_record_index * 8
+
+                schema_encoding = int.from_bytes(
+                    tail_page_range[SCHEMA_ENCODING_COLUMN].data[tail_offset:tail_offset+8],
+                    byteorder='little',
+                    signed=True
+                )
+                schema_bits = format(schema_encoding, f'0{self.num_columns}b')[::-1]
+
+                if schema_bits[column_index] == '1':
+                    return int.from_bytes(
+                        tail_page_range[4 + column_index].data[tail_offset:tail_offset + 8],
+                        byteorder='little',
+                        signed=True
+                    )
+                current_tail_rid = int.from_bytes(
+                    tail_page_range[INDIRECTION_COLUMN].data[tail_offset:tail_offset+8],
+                    byteorder='little',
+                    signed=True
+                )
+            # fallback to base if no tail updated this column
+            base_offset = record_index * 8
+            return int.from_bytes(
+                base_page_range[4 + column_index].data[base_offset:base_offset + 8],
+                byteorder='little',
+                signed=True
+            )
         
         # Build version chain (newest to oldest)
         current_tail_rid = indirection
