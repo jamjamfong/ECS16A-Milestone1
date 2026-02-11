@@ -98,7 +98,8 @@ class Query:
             for rid in rids:
                 data = self.table.get_version_data(rid, projected_columns_index, relative_version)
                 if data:
-                    results.append(Record(rid, search_key, data))
+                    actual_pk = self.table.get_column_value(rid, self.table.key)
+                    results.append(Record(rid, actual_pk, data))
             return results
         except Exception:
             return False
@@ -116,7 +117,7 @@ class Query:
                 return False
             
             rid = rids[0]
-            return self.table.update_record(rid, columns)
+            return self.table.update_record(rid, *columns)
         except Exception:
             return False
 
@@ -134,8 +135,9 @@ class Query:
             total = 0
             found = False
             for key in range(start_range, end_range + 1):
-                rid = self.table.index.locate(self.table.key, key)
-                if rid:
+                rids = self.table.index.locate(self.table.key, key)
+                if rids:
+                    rid = rids[0]
                     val = self.table.get_column_value(rid, aggregate_column_index)
                     total += val
                     found = True
@@ -158,8 +160,9 @@ class Query:
             total = 0
             found = False
             for key in range(start_range, end_range + 1):
-                rid = self.table.index.locate(self.table.key, key)
-                if rid:
+                rids = self.table.index.locate(self.table.key, key)
+                if rids:
+                    rid = rids[0]
                     val = self.table.get_version_column_value(rid, aggregate_column_index, relative_version)
                     total += val
                     found = True
