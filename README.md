@@ -6,6 +6,6 @@
 
 **Egnegt** 15% I debugged and made sure m1_tester ran to pass all of the testswhile also making some changes to index.py(making the insert_key and remove_key). I also made some contributions to table.py, making the first versions of the definitions for the methods. 
 
-**Maisie** 9% I wrote the initial query.py file.
+**Maisie** 13% I wrote the initial query.py file.
 
 **Tess** 
