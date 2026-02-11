@@ -191,128 +191,61 @@ class Table:
         return result
     
     def get_version_column_value(self, rid, column_index, relative_version):
-        if isinstance(rid, list):
-            if len(rid) == 0:
-                return None
-            rid = rid[0]
-        
-        if rid not in self.page_directory:
-            return None
+        if rid not in self.page_directory: return None
         
         location = self.page_directory[rid]
-        record_type, page_range_index, record_index = location
+        base_page_range = self.base_pages[location[1]]
+        base_offset = location[2] * 8
         
-        if record_type == 'base':
-            base_page_range = self.base_pages[page_range_index]
-        else:
-            return None
-        
-        offset = record_index * 8
-        
-        indirection = int.from_bytes(
-            base_page_range[INDIRECTION_COLUMN].data[offset:offset + 8],
-            byteorder='little',
-            signed=True
+        # Get head of tail chain
+        current_tail_rid = int.from_bytes(
+            base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset + 8],
+            byteorder='little', signed=True
         )
-        
-        # Version 0 means latest
-        if relative_version == 0:
-            # version 0 = latest, traverse tail chain respecting schema bits
-            current_tail_rid = indirection
-            while current_tail_rid != 0:
-                if current_tail_rid not in self.page_directory:
-                    break
-                tail_location = self.page_directory[current_tail_rid]
-                _, tail_page_range_index, tail_record_index = tail_location
-                tail_page_range = self.tail_pages[tail_page_range_index]
-                tail_offset = tail_record_index * 8
 
-                schema_encoding = int.from_bytes(
-                    tail_page_range[SCHEMA_ENCODING_COLUMN].data[tail_offset:tail_offset+8],
-                    byteorder='little',
-                    signed=True
-                )
-                schema_bits = format(schema_encoding, f'0{self.num_columns}b')[::-1]
-
-                if schema_bits[column_index] == '1':
-                    return int.from_bytes(
-                        tail_page_range[4 + column_index].data[tail_offset:tail_offset + 8],
-                        byteorder='little',
-                        signed=True
-                    )
-                current_tail_rid = int.from_bytes(
-                    tail_page_range[INDIRECTION_COLUMN].data[tail_offset:tail_offset+8],
-                    byteorder='little',
-                    signed=True
-                )
-            # fallback to base if no tail updated this column
-            base_offset = record_index * 8
-            return int.from_bytes(
-                base_page_range[4 + column_index].data[base_offset:base_offset + 8],
-                byteorder='little',
-                signed=True
-            )
-        
-        # Build version chain (newest to oldest)
-        current_tail_rid = indirection
-        version_chain = []
-        while current_tail_rid != 0:
-            if current_tail_rid not in self.page_directory:
-                break
-            version_chain.append(current_tail_rid)
+        # Step 1: Find the starting point for our search based on relative_version
+        # version 0 is the current_tail_rid, version -1 is its predecessor, etc.
+        for _ in range(abs(relative_version)):
+            if current_tail_rid == 0: break # Already at base
             
-            tail_location = self.page_directory[current_tail_rid]
-            _, tail_page_range_index, tail_record_index = tail_location
-            tail_page_range = self.tail_pages[tail_page_range_index]
+            tail_loc = self.page_directory[current_tail_rid]
+            tail_page_range = self.tail_pages[tail_loc[1]]
+            tail_offset = tail_loc[2] * 8
             
-            tail_offset = tail_record_index * 8
             current_tail_rid = int.from_bytes(
-                tail_page_range[INDIRECTION_COLUMN].data[tail_offset:tail_offset + 8],
-                byteorder='little',
-                signed=True
+                tail_page_range[INDIRECTION_COLUMN].data[tail_offset:tail_offset+8],
+                byteorder='little', signed=True
             )
-        
-        target_version_index = abs(relative_version)
-        
-        # If we don't have enough versions, return base
-        if target_version_index >= len(version_chain):
-            base_offset = record_index * 8
-            return int.from_bytes(
-                base_page_range[4 + column_index].data[base_offset:base_offset + 8],
-                byteorder='little',
-                signed=True
-            )
-        
-        # Get the tail record at the target version
-        tail_rid = version_chain[target_version_index]
-        tail_location = self.page_directory[tail_rid]
-        _, tail_page_range_index, tail_record_index = tail_location
-        tail_page_range = self.tail_pages[tail_page_range_index]
-        tail_offset = tail_record_index * 8
 
-        # Read schema encoding for this tail
-        schema_encoding = int.from_bytes(
-            tail_page_range[SCHEMA_ENCODING_COLUMN].data[tail_offset:tail_offset+8],
-            byteorder='little',
-            signed=True
+        # Step 2: Now find the LATEST value for the column starting FROM current_tail_rid
+        while current_tail_rid != 0:
+            tail_loc = self.page_directory[current_tail_rid]
+            t_page_range = self.tail_pages[tail_loc[1]]
+            t_offset = tail_loc[2] * 8
+            
+            schema_encoding = int.from_bytes(
+                t_page_range[SCHEMA_ENCODING_COLUMN].data[t_offset:t_offset+8],
+                byteorder='little', signed=True
+            )
+            
+            # Check if this specific tail record updated our column
+            if (schema_encoding >> column_index) & 1:
+                return int.from_bytes(
+                    t_page_range[4 + column_index].data[t_offset:t_offset+8],
+                    byteorder='little', signed=True
+                )
+            
+            # Move deeper into history
+            current_tail_rid = int.from_bytes(
+                t_page_range[INDIRECTION_COLUMN].data[t_offset:t_offset+8],
+                byteorder='little', signed=True
+            )
+
+        # Step 3: Fallback to base record
+        return int.from_bytes(
+            base_page_range[4 + column_index].data[base_offset:base_offset + 8],
+            byteorder='little', signed=True
         )
-        schema_bits = format(schema_encoding, f'0{self.num_columns}b')[::-1]
-
-        if schema_bits[column_index] == '1':
-            # Column was updated in this tail, return it
-            return int.from_bytes(
-                tail_page_range[4 + column_index].data[tail_offset:tail_offset + 8],
-                byteorder='little',
-                signed=True
-            )
-        else:
-            # Column was not updated in this tail, read from base
-            base_offset = record_index * 8
-            return int.from_bytes(
-                base_page_range[4 + column_index].data[base_offset:base_offset + 8],
-                byteorder='little',
-                signed=True
-            )
         
     def update_record(self, rid, columns):
         if rid not in self.page_directory:
@@ -320,56 +253,49 @@ class Table:
 
         base_location = self.page_directory[rid]
         record_type, base_page_range_index, base_record_index = base_location
-
-        if record_type != 'base':
-            return False
-
         base_page_range = self.base_pages[base_page_range_index]
         base_offset = base_record_index * 8
 
+        # Get the current head of the tail chain (previous indirection)
         current_indirection = int.from_bytes(
             base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset + 8],
-            byteorder='little',
-            signed=True
+            byteorder='little', signed=True
         )
 
-        columns = list(columns)
-        columns[self.key] = None
-
-        schema_encoding = ['0'] * self.num_columns
+        # 1. Prepare Schema Encoding (1 for updated, 0 for unchanged)
+        # Note: We reverse it here to stay consistent with your [::-1] retrieval
+        schema_bits = ['0'] * self.num_columns
         for i, value in enumerate(columns):
             if value is not None:
-                schema_encoding[i] = '1'
-        schema_encoding_str = ''.join(schema_encoding)
+                schema_bits[i] = '1'
+        schema_encoding_val = int(''.join(schema_bits[::-1]), 2)
         
         tail_rid = self.next_rid
         self.next_rid += 1
         
-        current_tail_range = self.tail_pages[-1]
-        if not current_tail_range[0].has_capacity():
-            total_columns = 4 + self.num_columns
-            self.tail_pages.append([Page() for _ in range(total_columns)])
-            current_tail_range = self.tail_pages[-1]
+        if not self.tail_pages[-1][0].has_capacity():
+            self.tail_pages.append([Page() for _ in range(4 + self.num_columns)])
         
-        current_tail_range[INDIRECTION_COLUMN].write(current_indirection)
+        current_tail_range = self.tail_pages[-1]
+        
+        # 2. Write Metadata
+        current_tail_range[INDIRECTION_COLUMN].write(current_indirection) # Point to older tail
         current_tail_range[RID_COLUMN].write(tail_rid)
         current_tail_range[TIMESTAMP_COLUMN].write(int(time()))
-        current_tail_range[SCHEMA_ENCODING_COLUMN].write(int(schema_encoding_str, 2))
+        current_tail_range[SCHEMA_ENCODING_COLUMN].write(schema_encoding_val)
         
+        # 3. Write Data (Only the columns provided)
         for i, value in enumerate(columns):
             if value is not None:
                 current_tail_range[4 + i].write(value)
             else:
-                prev_val = self._get_latest_column_value(rid, i, current_indirection, base_page_range, base_record_index)
-                current_tail_range[4 + i].write(prev_val)
+                current_tail_range[4 + i].write(0) # Placeholder
         
-        # Base record indirection is updated not the tail record's indirection
-        base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset + 8] = tail_rid.to_bytes(8, byteorder='little', signed=True)
+        # 4. Update Base Record Indirection to point to this NEW tail record
+        base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset + 8] = \
+            tail_rid.to_bytes(8, byteorder='little', signed=True)
         
-        tail_page_range_index = len(self.tail_pages) - 1
-        tail_record_index = current_tail_range[0].num_records - 1
-        self.page_directory[tail_rid] = ('tail', tail_page_range_index, tail_record_index)
-        
+        self.page_directory[tail_rid] = ('tail', len(self.tail_pages)-1, current_tail_range[0].num_records-1)
         return True
     
     def delete_record(self, rid):
