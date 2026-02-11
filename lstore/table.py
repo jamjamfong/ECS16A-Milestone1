@@ -255,13 +255,30 @@ class Table:
         _, tail_page_range_index, tail_record_index = tail_location
         tail_page_range = self.tail_pages[tail_page_range_index]
         tail_offset = tail_record_index * 8
-        
-        # Read the column value from this tail record
-        return int.from_bytes(
-            tail_page_range[4 + column_index].data[tail_offset:tail_offset + 8],
+
+        # Read schema encoding for this tail
+        schema_encoding = int.from_bytes(
+            tail_page_range[SCHEMA_ENCODING_COLUMN].data[tail_offset:tail_offset+8],
             byteorder='little',
             signed=True
         )
+        schema_bits = format(schema_encoding, f'0{self.num_columns}b')[::-1]
+
+        if schema_bits[column_index] == '1':
+            # Column was updated in this tail, return it
+            return int.from_bytes(
+                tail_page_range[4 + column_index].data[tail_offset:tail_offset + 8],
+                byteorder='little',
+                signed=True
+            )
+        else:
+            # Column was not updated in this tail, read from base
+            base_offset = record_index * 8
+            return int.from_bytes(
+                base_page_range[4 + column_index].data[base_offset:base_offset + 8],
+                byteorder='little',
+                signed=True
+            )
         
     def update_record(self, rid, columns):
         if rid not in self.page_directory:
