@@ -266,21 +266,30 @@ class Table:
     def update_record(self, rid, columns):
         if rid not in self.page_directory:
             return False
-        
-        location = self.page_directory[rid]
-        record_type, page_range_index, record_index = location
-        
-        if record_type == 'base':
-            page_range = self.base_pages[page_range_index]
-        else:
-            page_range = self.tail_pages[page_range_index]
-        
-        offset = record_index * 8
+
+        base_location = self.page_directory[rid]
+        record_type, base_page_range_index, base_record_index = base_location
+
+        if record_type != 'base':
+            return False
+
+        base_page_range = self.base_pages[base_page_range_index]
+        base_offset = base_record_index * 8
+
         current_indirection = int.from_bytes(
-            page_range[INDIRECTION_COLUMN].data[offset:offset + 8],
+            base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset + 8],
             byteorder='little',
             signed=True
         )
+
+        columns = list(columns)
+        columns[self.key] = None
+
+        schema_encoding = ['0'] * self.num_columns
+        for i, value in enumerate(columns):
+            if value is not None:
+                schema_encoding[i] = '1'
+        schema_encoding_str = ''.join(schema_encoding)
         
         tail_rid = self.next_rid
         self.next_rid += 1
@@ -291,21 +300,11 @@ class Table:
             self.tail_pages.append([Page() for _ in range(total_columns)])
             current_tail_range = self.tail_pages[-1]
         
-        schema_encoding = ['0'] * self.num_columns
-        for i, value in enumerate(columns):
-            if value is not None:
-                schema_encoding[i] = '1'
-        schema_encoding_str = ''.join(schema_encoding)
-        
         current_tail_range[INDIRECTION_COLUMN].write(current_indirection)
         current_tail_range[RID_COLUMN].write(tail_rid)
         current_tail_range[TIMESTAMP_COLUMN].write(int(time()))
         current_tail_range[SCHEMA_ENCODING_COLUMN].write(int(schema_encoding_str, 2))
         
-        base_location = self.page_directory[rid]
-        _, base_page_range_index, base_record_index = base_location
-        base_page_range = self.base_pages[base_page_range_index]
-
         for i, value in enumerate(columns):
             if value is not None:
                 current_tail_range[4 + i].write(value)
@@ -314,10 +313,7 @@ class Table:
                 current_tail_range[4 + i].write(prev_val)
         
         # Base record indirection is updated not the tail record's indirection
-        base_offset = base_record_index * 8
         base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset + 8] = tail_rid.to_bytes(8, byteorder='little', signed=True)
-        
-        #page_range[INDIRECTION_COLUMN].data[offset:offset + 8] = tail_rid.to_bytes(8, byteorder='little', signed=True)
         
         tail_page_range_index = len(self.tail_pages) - 1
         tail_record_index = current_tail_range[0].num_records - 1
