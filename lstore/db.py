@@ -1,10 +1,11 @@
 from lstore.table import Table
+from lstore.bufferpool import BufferPool
 
 class Database():
 
     def __init__(self):
         self.tables = {}  # Dictionary to hold table name (key) to Table object (Value) mapping
-        pass
+        self.bufferpool = BufferPool()
 
     # Not required for milestone1
     def open(self, path):
