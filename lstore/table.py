@@ -1,3 +1,4 @@
+import os
 from lstore.index import Index
 from lstore.page import Page
 from time import time
@@ -298,3 +299,17 @@ class Table:
         del self.page_directory[rid]
         return True
  
+    def get_or_load_page(self, page_id):
+        page = self.bufferpool.get_page(page_id)
+        if page:
+            return page
+        
+        file_path = os.path.join(self.bufferpool.path, f"page_{page_id}.bin")
+        new_page = Page()
+        if os.path.exists(file_path):
+            with open(file_path, "rb") as f:
+                new_page.data = bytearray(f.read())
+                new_page.num_records = len(new_page.data) // 8
+        
+        self.bufferpool.add_page(page_id, new_page)
+        return new_page
