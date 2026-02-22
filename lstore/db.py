@@ -4,14 +4,16 @@ class Database():
 
     def __init__(self):
         self.tables = {}  # Dictionary to hold table name (key) to Table object (Value) mapping
-        pass
+        self.bufferpool = BufferPool(buffer_size = 100)
 
     # Not required for milestone1
     def open(self, path):
-        pass
+        self.bufferpool.open(path)
+        print(f"Database opened at {path}")
 
     def close(self):
-        pass
+        self.bufferpool.close()
+        print("Database closed, all dirty pages flushed")
 
     """
     # Creates a new table
@@ -25,7 +27,7 @@ class Database():
             return self.tables[name]
         
         # Else, create a new table
-        table = Table(name, num_columns, key_index)
+        table = Table(name, num_columns, key_index, self.bufferpool)
         self.tables[name] = table
         return table
 
