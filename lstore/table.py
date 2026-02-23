@@ -28,7 +28,7 @@ class Table:
         self.num_columns = num_columns
         self.page_directory = {}
         self.index = Index(self)
-        self.merge_threshold_pages = 50  # The threshold to trigger a merge
+        self.merge_threshold_pages = 50 
         self.next_rid = 1
         
         total_columns = 4 + num_columns
@@ -74,7 +74,6 @@ class Table:
         if rid not in self.page_directory:
             return None
         
-        # Get base record location
         location = self.page_directory[rid]
         record_type, page_range_index, record_index = location
         
@@ -85,7 +84,6 @@ class Table:
         
         offset = record_index * 8
         
-        # Get indirection
         indirection = int.from_bytes(
             base_page_range[INDIRECTION_COLUMN].data[offset:offset + 8],
             byteorder='little',
@@ -95,7 +93,6 @@ class Table:
         return self._get_latest_column_value(rid, column_index, indirection, base_page_range, record_index)
     
     def _get_latest_column_value(self, base_rid, column_index, indirection, base_page_range, base_record_index):
-        # Walk tail chain from latest to oldest, return first tail with column updated
         current_tail_rid = indirection
         while current_tail_rid != 0:
             tail_location = self.page_directory.get(current_tail_rid)
@@ -105,7 +102,6 @@ class Table:
             tail_page_range = self.tail_pages[tail_page_range_index]
             tail_offset = tail_record_index * 8
 
-            # Read schema encoding
             schema_encoding = int.from_bytes(
                 tail_page_range[SCHEMA_ENCODING_COLUMN].data[tail_offset:tail_offset+8],
                 byteorder='little', signed=True
@@ -117,13 +113,11 @@ class Table:
                     tail_page_range[4 + column_index].data[tail_offset:tail_offset+8],
                     byteorder='little', signed=True
                 )
-            # Move to previous tail
             current_tail_rid = int.from_bytes(
                 tail_page_range[INDIRECTION_COLUMN].data[tail_offset:tail_offset+8],
                 byteorder='little', signed=True
             )
 
-        # Fallback to base if no tail updated this column
         offset = base_record_index * 8
         return int.from_bytes(
             base_page_range[4 + column_index].data[offset:offset+8],
@@ -140,7 +134,7 @@ class Table:
             self.base_pages.append([Page() for _ in range(total_columns)])
             current_page_range = self.base_pages[-1]
         
-        current_page_range[INDIRECTION_COLUMN].write(0)  # No tail record initially
+        current_page_range[INDIRECTION_COLUMN].write(0) 
         current_page_range[RID_COLUMN].write(rid)
         current_page_range[TIMESTAMP_COLUMN].write(int(time()))
         current_page_range[SCHEMA_ENCODING_COLUMN].write(int(schema_encoding, 2))
@@ -178,13 +172,11 @@ class Table:
         base_page_range = self.base_pages[location[1]]
         base_offset = location[2] * 8
 
-        # Get latest tail for this base
         current_tail_rid = int.from_bytes(
             base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset + 8],
             byteorder='little', signed=True
         )
 
-        # Traverse relative_version
         for _ in range(abs(relative_version)):
             if current_tail_rid == 0:
                 break
@@ -196,7 +188,6 @@ class Table:
                 byteorder='little', signed=True
             )
 
-        # Now find latest value for this column starting from current_tail_rid
         cur_rid = current_tail_rid
         while cur_rid != 0:
             tail_loc = self.page_directory[cur_rid]
@@ -215,13 +206,11 @@ class Table:
                     byteorder='little', signed=True
                 )
 
-            # Move to previous tail
             cur_rid = int.from_bytes(
                 t_page_range[INDIRECTION_COLUMN].data[t_offset:t_offset+8],
                 byteorder='little', signed=True
             )
 
-        # Fallback to base
         return int.from_bytes(
             base_page_range[4 + column_index].data[base_offset:base_offset+8],
             byteorder='little', signed=True
@@ -250,29 +239,24 @@ class Table:
 
         columns = list(columns)
 
-        # Compute schema encoding
         schema_bits = ['0'] * self.num_columns
         for i, val in enumerate(columns):
             if val is not None:
                 schema_bits[i] = '1'
         schema_encoding_val = int(''.join(schema_bits[::-1]), 2)
 
-        # Allocate new tail RID
         tail_rid = self.next_rid
         self.next_rid += 1
 
-        # Allocate tail page if needed
         if not self.tail_pages[-1][0].has_capacity():
             self.tail_pages.append([Page() for _ in range(4 + self.num_columns)])
         current_tail_range = self.tail_pages[-1]
 
-        # Write tail metadata
         current_tail_range[INDIRECTION_COLUMN].write(current_indirection)
         current_tail_range[RID_COLUMN].write(tail_rid)
         current_tail_range[TIMESTAMP_COLUMN].write(int(time()))
         current_tail_range[SCHEMA_ENCODING_COLUMN].write(schema_encoding_val)
 
-        # Fully materialize tail record
         for i in range(self.num_columns):
             if columns[i] is not None:
                 value = columns[i]
@@ -280,10 +264,8 @@ class Table:
                 value = self._get_latest_column_value(rid, i, current_indirection, base_page_range, base_record_index)
             current_tail_range[4 + i].write(value)
 
-        # Update base indirection
         base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset+8] = tail_rid.to_bytes(8, byteorder='little', signed=True)
 
-        # Update page directory
         tail_page_range_index = len(self.tail_pages) - 1
         tail_record_index = current_tail_range[0].num_records - 1
         self.page_directory[tail_rid] = ('tail', tail_page_range_index, tail_record_index)
