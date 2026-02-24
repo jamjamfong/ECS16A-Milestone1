@@ -11,9 +11,7 @@ class Query:
     """
     def __init__(self, table):
         self.table = table
-        
 
-    
     """
     # internal Method
     # Read a record with specified RID
@@ -28,12 +26,11 @@ class Query:
                 
             rid = rids[0]
             self.table.delete_record(rid)
-            self.table.index.remove_key(self.table.key, primary_key)
+            self.table.index.remove_key(self.table.key, primary_key, rid)
             return True
         except Exception:
             return False
-    
-    
+
     """
     # Insert a record with specified columns
     # Return True upon succesful insertion
@@ -56,7 +53,19 @@ class Query:
         except Exception:
             return False
 
-    
+    def _locate_rids(self, search_key, search_key_index):
+        """Helper: locate RIDs by index, falling back to full table scan if no index."""
+        rids = self.table.index.locate(search_key_index, search_key)
+        if not rids:
+            # FIX: full table scan fallback for non-indexed columns
+            rids = []
+            for rid, location in self.table.page_directory.items():
+                if location[0] == 'base':
+                    val = self.table.get_column_value(rid, search_key_index)
+                    if val == search_key:
+                        rids.append(rid)
+        return rids
+
     """
     # Read matching record with specified search key
     # :param search_key: the value you want to search based on
@@ -68,7 +77,7 @@ class Query:
     """
     def select(self, search_key, search_key_index, projected_columns_index):
         try:
-            rids = self.table.index.locate(search_key_index, search_key)
+            rids = self._locate_rids(search_key, search_key_index)
             results = []
             for rid in rids:
                 data = self.table.get_record_data(rid, projected_columns_index)
@@ -78,9 +87,7 @@ class Query:
             return results
         except Exception:
             return False
-            
 
-    
     """
     # Read matching record with specified search key
     # :param search_key: the value you want to search based on
@@ -93,18 +100,17 @@ class Query:
     """
     def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
         try:
-            rids = self.table.index.locate(search_key_index, search_key)
+            rids = self._locate_rids(search_key, search_key_index)
             results = []
             for rid in rids:
                 data = self.table.get_version_data(rid, projected_columns_index, relative_version)
-                if data:
+                if data is not None:
                     actual_pk = self.table.get_column_value(rid, self.table.key)
                     results.append(Record(rid, actual_pk, data))
             return results
         except Exception:
             return False
 
-    
     """
     # Update a record with specified key and columns
     # Returns True if update is succesful
@@ -126,7 +132,6 @@ class Query:
         except Exception:
             return False
 
-    
     """
     :param start_range: int         # Start of the key range to aggregate 
     :param end_range: int           # End of the key range to aggregate 
@@ -150,7 +155,6 @@ class Query:
         except Exception:
             return False
 
-    
     """
     :param start_range: int         # Start of the key range to aggregate 
     :param end_range: int           # End of the key range to aggregate 
@@ -175,7 +179,6 @@ class Query:
         except Exception:
             return False
 
-    
     """
     incremenets one column of the record
     this implementation should work if your select and update queries already work

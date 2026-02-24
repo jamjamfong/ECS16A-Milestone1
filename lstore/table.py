@@ -94,6 +94,7 @@ class Table:
     
     def _get_latest_column_value(self, base_rid, column_index, indirection, base_page_range, base_record_index):
         current_tail_rid = indirection
+
         while current_tail_rid != 0:
             tail_location = self.page_directory.get(current_tail_rid)
             if not tail_location:
@@ -172,44 +173,45 @@ class Table:
         base_page_range = self.base_pages[location[1]]
         base_offset = location[2] * 8
 
+        tail_chain = []
         current_tail_rid = int.from_bytes(
             base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset + 8],
             byteorder='little', signed=True
         )
 
-        for _ in range(abs(relative_version)):
-            if current_tail_rid == 0:
+        while current_tail_rid != 0:
+            if current_tail_rid not in self.page_directory:
                 break
+            tail_chain.append(current_tail_rid)
             tail_loc = self.page_directory[current_tail_rid]
             tail_page_range = self.tail_pages[tail_loc[1]]
             tail_offset = tail_loc[2] * 8
             current_tail_rid = int.from_bytes(
-                tail_page_range[INDIRECTION_COLUMN].data[tail_offset:tail_offset+8],
+                tail_page_range[INDIRECTION_COLUMN].data[tail_offset:tail_offset + 8],
                 byteorder='little', signed=True
             )
+        
+        skip = abs(relative_version)
+        search_chain = tail_chain[skip:]  # remaining chain to search for column value
 
-        cur_rid = current_tail_rid
-        while cur_rid != 0:
-            tail_loc = self.page_directory[cur_rid]
+
+        for tail_rid in search_chain:
+            tail_loc = self.page_directory[tail_rid]
             t_page_range = self.tail_pages[tail_loc[1]]
             t_offset = tail_loc[2] * 8
 
             schema_encoding = int.from_bytes(
-                t_page_range[SCHEMA_ENCODING_COLUMN].data[t_offset:t_offset+8],
+                t_page_range[SCHEMA_ENCODING_COLUMN].data[t_offset:t_offset + 8],
                 byteorder='little', signed=True
             )
+
             schema_bits = format(schema_encoding, f'0{self.num_columns}b')[::-1]
 
             if schema_bits[column_index] == '1':
                 return int.from_bytes(
-                    t_page_range[4 + column_index].data[t_offset:t_offset+8],
+                    t_page_range[4 + column_index].data[t_offset:t_offset + 8],
                     byteorder='little', signed=True
                 )
-
-            cur_rid = int.from_bytes(
-                t_page_range[INDIRECTION_COLUMN].data[t_offset:t_offset+8],
-                byteorder='little', signed=True
-            )
 
         return int.from_bytes(
             base_page_range[4 + column_index].data[base_offset:base_offset+8],
