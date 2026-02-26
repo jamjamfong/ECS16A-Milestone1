@@ -1,5 +1,6 @@
 import os
-import pickle
+import io
+import json
 from lstore.table import Table
 from lstore.page import Page
 from lstore.bufferpool import BufferPool
@@ -16,12 +17,18 @@ class Database():
         os.makedirs(path, exist_ok=True)
         self.bufferpool = BufferPool(path)
 
-        meta_path = os.path.join(path, 'tables.pkl')
+        meta_path = os.path.join(path, 'tables.meta')
         if not os.path.exists(meta_path):
             return
 
-        with open(meta_path, 'rb') as f:
-            table_metas = pickle.load(f)
+        with io.open(meta_path, 'r', encoding='utf-8') as f:
+            raw = json.load(f)
+
+        table_metas = []
+        for m in raw:
+            m['page_directory'] = {int(k): tuple(v) for k, v in m['page_directory'].items()}
+            table_metas.append(m)
+
 
         for meta in table_metas:
             name = meta['name']
@@ -33,7 +40,7 @@ class Database():
             table.next_rid = next_rid
             table.page_directory = meta['page_directory']
 
-            total_columns = 4 + num_columns
+            total_columns = 5 + num_columns
 
             # Load base pages
             base_pages_path = os.path.join(path, f'{name}_base_pages.bin')
@@ -110,9 +117,9 @@ class Database():
                 'num_tail_ranges': len(table.tail_pages),
             })
 
-        meta_path = os.path.join(self.path, 'tables.pkl')
-        with open(meta_path, 'wb') as f:
-            pickle.dump(table_metas, f)
+        meta_path = os.path.join(self.path, 'tables.meta')
+        with io.open(meta_path, 'w', encoding='utf-8') as f:
+            json.dump(table_metas,f)
 
     """
     # Creates a new table

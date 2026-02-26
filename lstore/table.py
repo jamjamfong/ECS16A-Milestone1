@@ -32,7 +32,7 @@ class Table:
         self.next_rid = 1
         self.bufferpool = bufferpool
         
-        total_columns = 4 + num_columns
+        total_columns = 5 + num_columns
         self.base_pages = [[Page() for _ in range(total_columns)]]
         self.tail_pages = [[Page() for _ in range(total_columns)]]
 
@@ -129,7 +129,7 @@ class Table:
 
             if schema_bits[column_index] == '1':
                 return int.from_bytes(
-                    tail_page_range[4 + column_index].data[tail_offset:tail_offset+8],
+                    tail_page_range[5 + column_index].data[tail_offset:tail_offset+8],
                     byteorder='little', signed=True
                 )
             current_tail_rid = int.from_bytes(
@@ -139,7 +139,7 @@ class Table:
 
         offset = base_record_index * 8
         return int.from_bytes(
-            base_page_range[4 + column_index].data[offset:offset+8],
+            base_page_range[5 + column_index].data[offset:offset+8],
             byteorder='little', signed=True
         )
     
@@ -149,7 +149,7 @@ class Table:
         current_page_range = self.base_pages[-1]
         
         if not current_page_range[0].has_capacity():
-            total_columns = 4 + self.num_columns
+            total_columns = 5 + self.num_columns
             self.base_pages.append([Page() for _ in range(total_columns)])
             current_page_range = self.base_pages[-1]
             new_range_idx = len(self.base_pages) - 1
@@ -162,7 +162,7 @@ class Table:
         current_page_range[SCHEMA_ENCODING_COLUMN].write(int(schema_encoding, 2))
         
         for i, value in enumerate(columns):
-            current_page_range[4 + i].write(value)
+            current_page_range[5 + i].write(value)
         
         page_range_index = len(self.base_pages) - 1
         record_index = current_page_range[0].num_records - 1
@@ -230,12 +230,12 @@ class Table:
 
             if schema_bits[column_index] == '1':
                 return int.from_bytes(
-                    t_page_range[4 + column_index].data[t_offset:t_offset + 8],
+                    t_page_range[5 + column_index].data[t_offset:t_offset + 8],
                     byteorder='little', signed=True
                 )
 
         return int.from_bytes(
-            base_page_range[4 + column_index].data[base_offset:base_offset+8],
+            base_page_range[5 + column_index].data[base_offset:base_offset+8],
             byteorder='little', signed=True
         )
         
@@ -272,7 +272,7 @@ class Table:
         self.next_rid += 1
 
         if not self.tail_pages[-1][0].has_capacity():
-            self.tail_pages.append([Page() for _ in range(4 + self.num_columns)])
+            self.tail_pages.append([Page() for _ in range(5 + self.num_columns)])
             new_range_idx = len(self.tail_pages) - 1
             for col_idx, page in enumerate(self.tail_pages[new_range_idx]):
                 self._register_page('tail', new_range_idx, col_idx, page)
@@ -288,7 +288,7 @@ class Table:
                 value = columns[i]
             else:
                 value = self._get_latest_column_value(rid, i, current_indirection, base_page_range, base_record_index)
-            current_tail_range[4 + i].write(value)
+            current_tail_range[5 + i].write(value)
 
         base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset+8] = tail_rid.to_bytes(8, byteorder='little', signed=True)
         base_page_range[INDIRECTION_COLUMN].dirty = True
