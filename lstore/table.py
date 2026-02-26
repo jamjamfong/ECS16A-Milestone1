@@ -4,14 +4,13 @@ from time import time
 import threading
 import copy
 
-
 INDIRECTION_COLUMN = 0
 RID_COLUMN = 1
 TIMESTAMP_COLUMN = 2
 SCHEMA_ENCODING_COLUMN = 3
 
 BASE_RID_COLUMN = 4
-MERGE_TAIL_PAGE_THRESHOLD = 10 
+MERGE_TAIL_PAGE_THRESHOLD = 10
 
 
 class Record:
@@ -20,6 +19,7 @@ class Record:
         self.rid = rid
         self.key = key
         self.columns = columns
+
 
 class Table:
 
@@ -34,13 +34,18 @@ class Table:
         self.num_columns = num_columns
         self.page_directory = {}
         self.index = Index(self)
-        self.merge_threshold_pages = 50 
         self.next_rid = 1
         self.bufferpool = bufferpool
-        
+
         total_columns = 5 + num_columns
         self.base_pages = [[Page() for _ in range(total_columns)]]
         self.tail_pages = [[Page() for _ in range(total_columns)]]
+
+        self.tps = [0]
+
+        self._merge_lock = threading.Lock()
+        self._merge_thread = None
+        self._updates_since_merge = 0
 
         for col_idx, page in enumerate(self.base_pages[0]):
             self._register_page('base', 0, col_idx, page)
@@ -59,63 +64,148 @@ class Table:
         for page in page_range:
             page.pin_count = max(0, page.pin_count - 1)
 
-    def __merge(self):
-        print("merge is happening")
-        pass
-    
-    def get_record_data(self, rid, projected_columns_index):
-            if rid not in self.page_directory:
-                return None
+    def _read_int(self, page, record_index):
+        offset = record_index * 8
+        return int.from_bytes(page.data[offset:offset + 8], byteorder='little', signed=True)
 
-            result = []
-            location = self.page_directory[rid]
-            record_type, page_range_index, record_index = location
-            if record_type == 'base':
-                base_page_range = self.base_pages[page_range_index]
-            else:
-                return None
-            offset = record_index * 8
-            indirection = int.from_bytes(
-                base_page_range[INDIRECTION_COLUMN].data[offset:offset + 8],
-                byteorder='little',
-                signed=True
-            )
-        
-            for i in range(self.num_columns):
-                if projected_columns_index[i] == 1:
-                    value = self._get_latest_column_value(rid, i, indirection, base_page_range, record_index)
-                    result.append(value)
-                else:
-                    result.append(None)
-            return result
-    
-    def get_column_value(self, rid, column_index):
-        if isinstance(rid, list):
-            if len(rid) == 0:
-                return None
-            rid = rid[0]
-        
+    def _write_int(self, page, record_index, value):
+        offset = record_index * 8
+        page.data[offset:offset + 8] = value.to_bytes(8, byteorder='little', signed=True)
+
+    def _merge(self):
+        from collections import defaultdict
+
+        with self._merge_lock:
+            num_ranges = len(self.base_pages)
+            base_snapshot = [[copy.deepcopy(p) for p in r] for r in self.base_pages]
+            tail_snapshot = [[copy.deepcopy(p) for p in r] for r in self.tail_pages]
+            pd_snapshot = dict(self.page_directory)
+            tps_snapshot = list(self.tps)
+
+        for range_idx in range(num_ranges):
+            new_range = [copy.deepcopy(p) for p in base_snapshot[range_idx]]
+            current_tps = tps_snapshot[range_idx]
+
+            tail_records_rev = []
+            for tail_range in tail_snapshot:
+                num_recs = tail_range[RID_COLUMN].num_records
+                for rec_idx in range(num_recs - 1, -1, -1):
+                    tail_rid = self._read_int(tail_range[RID_COLUMN], rec_idx)
+                    if tail_rid not in pd_snapshot:
+                        continue
+                    loc = pd_snapshot[tail_rid]
+                    if loc[0] != 'tail':
+                        continue
+                    base_rid = self._read_int(tail_range[BASE_RID_COLUMN], rec_idx)
+                    if base_rid not in pd_snapshot:
+                        continue
+                    base_loc = pd_snapshot[base_rid]
+                    if base_loc[0] != 'base' or base_loc[1] != range_idx:
+                        continue
+                    tail_records_rev.append((tail_rid, tail_range, rec_idx, base_rid, base_loc[2]))
+
+            tails_by_base = defaultdict(list)
+            for entry in tail_records_rev:
+                tails_by_base[entry[3]].append(entry)
+
+            latest_tps = current_tps
+
+            for base_rid, entries in tails_by_base.items():
+                base_rec_idx = entries[0][4]
+                resolved_cols = set()
+
+                for tail_rid, tail_range, rec_idx, _, _ in entries:
+                    schema_encoding = self._read_int(tail_range[SCHEMA_ENCODING_COLUMN], rec_idx)
+                    schema_bits = format(schema_encoding, f'0{self.num_columns}b')[::-1]
+
+                    for col_idx in range(self.num_columns):
+                        if schema_bits[col_idx] == '1' and col_idx not in resolved_cols:
+                            value = self._read_int(tail_range[5 + col_idx], rec_idx)
+                            self._write_int(new_range[5 + col_idx], base_rec_idx, value)
+                            resolved_cols.add(col_idx)
+
+                    if len(resolved_cols) == self.num_columns:
+                        break
+
+                most_recent_tail_rid = entries[0][0]
+                self._write_int(new_range[INDIRECTION_COLUMN], base_rec_idx, most_recent_tail_rid)
+
+                if most_recent_tail_rid > latest_tps:
+                    latest_tps = most_recent_tail_rid
+
+            with self._merge_lock:
+                if range_idx < len(self.base_pages):
+                    live_range = self.base_pages[range_idx]
+                    num_records = live_range[RID_COLUMN].num_records
+                    for rec_idx in range(num_records):
+                        live_indir = self._read_int(live_range[INDIRECTION_COLUMN], rec_idx)
+                        self._write_int(new_range[INDIRECTION_COLUMN], rec_idx, live_indir)
+                    self.base_pages[range_idx] = new_range
+                    self.tps[range_idx] = latest_tps
+
+    def _trigger_merge(self):
+        if self._merge_thread is not None and self._merge_thread.is_alive():
+            return
+        self._merge_thread = threading.Thread(target=self._merge, daemon=True)
+        self._merge_thread.start()
+
+    def wait_for_merge(self):
+        if self._merge_thread is not None:
+            self._merge_thread.join()
+
+    def get_record_data(self, rid, projected_columns_index):
         if rid not in self.page_directory:
             return None
-        
+
+        result = []
         location = self.page_directory[rid]
         record_type, page_range_index, record_index = location
-        
         if record_type == 'base':
             base_page_range = self.base_pages[page_range_index]
         else:
             return None
-        
         offset = record_index * 8
-        
         indirection = int.from_bytes(
             base_page_range[INDIRECTION_COLUMN].data[offset:offset + 8],
             byteorder='little',
             signed=True
         )
-        
+
+        for i in range(self.num_columns):
+            if projected_columns_index[i] == 1:
+                value = self._get_latest_column_value(rid, i, indirection, base_page_range, record_index)
+                result.append(value)
+            else:
+                result.append(None)
+        return result
+
+    def get_column_value(self, rid, column_index):
+        if isinstance(rid, list):
+            if len(rid) == 0:
+                return None
+            rid = rid[0]
+
+        if rid not in self.page_directory:
+            return None
+
+        location = self.page_directory[rid]
+        record_type, page_range_index, record_index = location
+
+        if record_type == 'base':
+            base_page_range = self.base_pages[page_range_index]
+        else:
+            return None
+
+        offset = record_index * 8
+
+        indirection = int.from_bytes(
+            base_page_range[INDIRECTION_COLUMN].data[offset:offset + 8],
+            byteorder='little',
+            signed=True
+        )
+
         return self._get_latest_column_value(rid, column_index, indirection, base_page_range, record_index)
-    
+
     def _get_latest_column_value(self, base_rid, column_index, indirection, base_page_range, base_record_index):
         current_tail_rid = indirection
 
@@ -128,70 +218,71 @@ class Table:
             tail_offset = tail_record_index * 8
 
             schema_encoding = int.from_bytes(
-                tail_page_range[SCHEMA_ENCODING_COLUMN].data[tail_offset:tail_offset+8],
+                tail_page_range[SCHEMA_ENCODING_COLUMN].data[tail_offset:tail_offset + 8],
                 byteorder='little', signed=True
             )
             schema_bits = format(schema_encoding, f'0{self.num_columns}b')[::-1]
 
             if schema_bits[column_index] == '1':
                 return int.from_bytes(
-                    tail_page_range[5 + column_index].data[tail_offset:tail_offset+8],
+                    tail_page_range[5 + column_index].data[tail_offset:tail_offset + 8],
                     byteorder='little', signed=True
                 )
             current_tail_rid = int.from_bytes(
-                tail_page_range[INDIRECTION_COLUMN].data[tail_offset:tail_offset+8],
+                tail_page_range[INDIRECTION_COLUMN].data[tail_offset:tail_offset + 8],
                 byteorder='little', signed=True
             )
 
         offset = base_record_index * 8
         return int.from_bytes(
-            base_page_range[5 + column_index].data[offset:offset+8],
+            base_page_range[5 + column_index].data[offset:offset + 8],
             byteorder='little', signed=True
         )
-    
+
     def add_base_record(self, columns, schema_encoding):
         rid = self.next_rid
         self.next_rid += 1
         current_page_range = self.base_pages[-1]
-        
+
         if not current_page_range[0].has_capacity():
             total_columns = 5 + self.num_columns
             self.base_pages.append([Page() for _ in range(total_columns)])
+            self.tps.append(0)
             current_page_range = self.base_pages[-1]
             new_range_idx = len(self.base_pages) - 1
             for col_idx, page in enumerate(current_page_range):
                 self._register_page('base', new_range_idx, col_idx, page)
-        
-        current_page_range[INDIRECTION_COLUMN].write(0) 
+
+        current_page_range[INDIRECTION_COLUMN].write(0)
         current_page_range[RID_COLUMN].write(rid)
         current_page_range[TIMESTAMP_COLUMN].write(int(time()))
         current_page_range[SCHEMA_ENCODING_COLUMN].write(int(schema_encoding, 2))
-        
+        current_page_range[BASE_RID_COLUMN].write(rid)
+
         for i, value in enumerate(columns):
             current_page_range[5 + i].write(value)
-        
+
         page_range_index = len(self.base_pages) - 1
         record_index = current_page_range[0].num_records - 1
         self.page_directory[rid] = ('base', page_range_index, record_index)
-        
+
         return rid
-    
+
     def get_version_data(self, rid, projected_columns_index, relative_version):
-        
         if rid not in self.page_directory:
             return None
-        
+
         result = []
-        
+
         for i in range(self.num_columns):
             if projected_columns_index[i] == 1:
                 value = self.get_version_column_value(rid, i, relative_version)
                 result.append(value)
             else:
                 result.append(None)
-        
+
         return result
-    
+
     def get_version_column_value(self, rid, column_index, relative_version):
         if rid not in self.page_directory:
             return None
@@ -217,10 +308,9 @@ class Table:
                 tail_page_range[INDIRECTION_COLUMN].data[tail_offset:tail_offset + 8],
                 byteorder='little', signed=True
             )
-        
-        skip = abs(relative_version)
-        search_chain = tail_chain[skip:]  # remaining chain to search for column value
 
+        skip = abs(relative_version)
+        search_chain = tail_chain[skip:]
 
         for tail_rid in search_chain:
             tail_loc = self.page_directory[tail_rid]
@@ -241,10 +331,10 @@ class Table:
                 )
 
         return int.from_bytes(
-            base_page_range[5 + column_index].data[base_offset:base_offset+8],
+            base_page_range[5 + column_index].data[base_offset:base_offset + 8],
             byteorder='little', signed=True
         )
-        
+
     def update_record(self, rid, columns):
         if rid not in self.page_directory:
             return False
@@ -282,12 +372,14 @@ class Table:
             new_range_idx = len(self.tail_pages) - 1
             for col_idx, page in enumerate(self.tail_pages[new_range_idx]):
                 self._register_page('tail', new_range_idx, col_idx, page)
+
         current_tail_range = self.tail_pages[-1]
 
         current_tail_range[INDIRECTION_COLUMN].write(current_indirection)
         current_tail_range[RID_COLUMN].write(tail_rid)
         current_tail_range[TIMESTAMP_COLUMN].write(int(time()))
         current_tail_range[SCHEMA_ENCODING_COLUMN].write(schema_encoding_val)
+        current_tail_range[BASE_RID_COLUMN].write(rid)
 
         for i in range(self.num_columns):
             if columns[i] is not None:
@@ -295,32 +387,28 @@ class Table:
             else:
                 value = self._get_latest_column_value(rid, i, current_indirection, base_page_range, base_record_index)
             current_tail_range[5 + i].write(value)
-
-        base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset+8] = tail_rid.to_bytes(8, byteorder='little', signed=True)
-        base_page_range[INDIRECTION_COLUMN].dirty = True
+        with self._merge_lock:
+            current_base_page_range = self.base_pages[base_page_range_index]
+            current_base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset + 8] = \
+                tail_rid.to_bytes(8, byteorder='little', signed=True)
+            current_base_page_range[INDIRECTION_COLUMN].dirty = True
 
         tail_page_range_index = len(self.tail_pages) - 1
         tail_record_index = current_tail_range[0].num_records - 1
         self.page_directory[tail_rid] = ('tail', tail_page_range_index, tail_record_index)
-
-        for i in range(self.num_columns):
-            if self.index.indices[i] is not None and columns[i] is not None:
-                old_val = self._get_latest_column_value(rid, i, current_indirection, base_page_range, base_record_index)
-                self.index.remove_key(i, old_val, rid)
-                self.index.add_to_index(i, columns[i], rid)
+        if len(self.tail_pages) >= MERGE_TAIL_PAGE_THRESHOLD:
+            self._trigger_merge()
 
         return True
-    
     def delete_record(self, rid):
         if rid not in self.page_directory:
             return False
-        
+
         for col_idx in range(self.num_columns):
             if self.index.indices[col_idx] is not None:
                 val = self.get_column_value(rid, col_idx)
                 if val is not None:
                     self.index.remove_key(col_idx, val, rid)
-            
+
         del self.page_directory[rid]
         return True
- 
