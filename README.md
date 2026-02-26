@@ -19,6 +19,6 @@
 
 **Egnegt** -
 
-**Maisie** - 
+**Maisie** - 20% I contributed to the initial bufferpool.py file and created more functions in the table class. I aided in debugging to ensure test cases were passed.
 
 **Tess** - 20% did the index portion and helped with the merge
