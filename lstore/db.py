@@ -1,6 +1,10 @@
 import os
+<<<<<<< HEAD
 import io
 import json
+=======
+import struct  # CHANGED: replaced pickle with struct for binary metadata I/O
+>>>>>>> 06f21ad53c294d5606cf54bf4a1543648063790b
 from lstore.table import Table
 from lstore.page import Page
 from lstore.bufferpool import BufferPool
@@ -17,6 +21,7 @@ class Database():
         os.makedirs(path, exist_ok=True)
         self.bufferpool = BufferPool(path)
 
+<<<<<<< HEAD
         meta_path = os.path.join(path, 'tables.meta')
         if not os.path.exists(meta_path):
             return
@@ -29,6 +34,37 @@ class Database():
             m['page_directory'] = {int(k): tuple(v) for k, v in m['page_directory'].items()}
             table_metas.append(m)
 
+=======
+        meta_path = os.path.join(path, 'tables.meta')  # CHANGED: .pkl -> .meta
+        if not os.path.exists(meta_path):
+            return
+
+        # CHANGED: replaced pickle.load with binary struct read
+        with open(meta_path, 'rb') as f:
+            num_tables = struct.unpack('Q', f.read(8))[0]
+            table_metas = []
+            for _ in range(num_tables):
+                name_len = struct.unpack('Q', f.read(8))[0]
+                name = f.read(name_len).decode('utf-8')
+                num_columns, key, next_rid, num_base_ranges, num_tail_ranges = struct.unpack('5q', f.read(40))
+                num_entries = struct.unpack('Q', f.read(8))[0]
+                page_directory = {}
+                for _ in range(num_entries):
+                    rid = struct.unpack('q', f.read(8))[0]
+                    ptype_len = struct.unpack('Q', f.read(8))[0]
+                    ptype = f.read(ptype_len).decode('utf-8')
+                    pr_idx, slot = struct.unpack('2q', f.read(16))
+                    page_directory[rid] = (ptype, pr_idx, slot)
+                table_metas.append({
+                    'name': name,
+                    'num_columns': num_columns,
+                    'key': key,
+                    'next_rid': next_rid,
+                    'page_directory': page_directory,
+                    'num_base_ranges': num_base_ranges,
+                    'num_tail_ranges': num_tail_ranges,
+                })
+>>>>>>> 06f21ad53c294d5606cf54bf4a1543648063790b
 
         for meta in table_metas:
             name = meta['name']
@@ -40,7 +76,11 @@ class Database():
             table.next_rid = next_rid
             table.page_directory = meta['page_directory']
 
+<<<<<<< HEAD
             total_columns = 5 + num_columns
+=======
+            total_columns = 5 + num_columns  # CHANGED: 4 -> 5 to match BASE_RID_COLUMN
+>>>>>>> 06f21ad53c294d5606cf54bf4a1543648063790b
 
             # Load base pages
             base_pages_path = os.path.join(path, f'{name}_base_pages.bin')
@@ -85,8 +125,17 @@ class Database():
         if self.path is None:
             return
 
+<<<<<<< HEAD
         os.makedirs(self.path, exist_ok=True)
         table_metas = []
+=======
+        # ADDED: wait for any running merge threads before writing to disk
+        for table in self.tables.values():
+            if table._merge_thread and table._merge_thread.is_alive():
+                table._merge_thread.join(timeout=10)
+
+        os.makedirs(self.path, exist_ok=True)
+>>>>>>> 06f21ad53c294d5606cf54bf4a1543648063790b
 
         for name, table in self.tables.items():
 
@@ -107,6 +156,7 @@ class Database():
                         f.write(page.num_records.to_bytes(8, byteorder='little'))
                         page.dirty = False
 
+<<<<<<< HEAD
             table_metas.append({
                 'name': name,
                 'num_columns': table.num_columns,
@@ -120,6 +170,30 @@ class Database():
         meta_path = os.path.join(self.path, 'tables.meta')
         with io.open(meta_path, 'w', encoding='utf-8') as f:
             json.dump(table_metas,f)
+=======
+        # CHANGED: replaced pickle.dump with binary struct write
+        meta_path = os.path.join(self.path, 'tables.meta')  # CHANGED: .pkl -> .meta
+        with open(meta_path, 'wb') as f:
+            f.write(struct.pack('Q', len(self.tables)))
+            for name, table in self.tables.items():
+                name_bytes = name.encode('utf-8')
+                f.write(struct.pack('Q', len(name_bytes)))
+                f.write(name_bytes)
+                f.write(struct.pack('5q',
+                    table.num_columns,
+                    table.key,
+                    table.next_rid,
+                    len(table.base_pages),
+                    len(table.tail_pages),
+                ))
+                f.write(struct.pack('Q', len(table.page_directory)))
+                for rid, (ptype, pr_idx, slot) in table.page_directory.items():
+                    f.write(struct.pack('q', rid))
+                    ptype_bytes = ptype.encode('utf-8')
+                    f.write(struct.pack('Q', len(ptype_bytes)))
+                    f.write(ptype_bytes)
+                    f.write(struct.pack('2q', pr_idx, slot))
+>>>>>>> 06f21ad53c294d5606cf54bf4a1543648063790b
 
     """
     # Creates a new table

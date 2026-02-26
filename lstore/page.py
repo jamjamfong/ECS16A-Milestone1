@@ -1,4 +1,3 @@
-
 class Page:
 
     def __init__(self):
@@ -19,6 +18,19 @@ class Page:
         """
         self.num_records += 1
         offset = (self.num_records - 1) * 8
+<<<<<<< HEAD
         self.data[offset:offset + 8] = value.to_bytes(8, byteorder ='little', signed=True)
         self.dirty = True
+=======
+        self.data[offset:offset + 8] = value.to_bytes(8, byteorder='little', signed=True)
+        self.dirty = True
 
+    def read(self, slot):
+        offset = slot * 8
+        return int.from_bytes(self.data[offset:offset + 8], byteorder='little', signed=True)
+>>>>>>> 06f21ad53c294d5606cf54bf4a1543648063790b
+
+    def write_at(self, slot, value):
+        offset = slot * 8
+        self.data[offset:offset + 8] = value.to_bytes(8, byteorder='little', signed=True)
+        self.dirty = True
