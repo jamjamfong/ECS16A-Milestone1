@@ -4,6 +4,8 @@ class Page:
     def __init__(self):
         self.num_records = 0
         self.data = bytearray(4096)
+        self.dirty = False
+        self.pin_count = 0
 
     def has_capacity(self):
         # Each record is 8 bytes (assuming integer size), so we can store 4096 / 8 = 512 records
@@ -18,4 +20,5 @@ class Page:
         self.num_records += 1
         offset = (self.num_records - 1) * 8
         self.data[offset:offset + 8] = value.to_bytes(8, byteorder ='little', signed=True)
+        self.dirty = True
 

@@ -25,9 +25,7 @@ class Query:
                 return False
                 
             rid = rids[0]
-            self.table.delete_record(rid)
-            self.table.index.remove_key(self.table.key, primary_key, rid)
-            return True
+            return self.table.delete_record(rid)
         except Exception:
             return False
 

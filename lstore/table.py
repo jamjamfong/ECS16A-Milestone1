@@ -22,7 +22,7 @@ class Table:
     :param num_columns: int     #Number of Columns: all columns are integer
     :param key: int             #Index of table key in columns
     """
-    def __init__(self, name, num_columns, key):
+    def __init__(self, name, num_columns, key, bufferpool=None):
         self.name = name
         self.key = key
         self.num_columns = num_columns
@@ -30,10 +30,28 @@ class Table:
         self.index = Index(self)
         self.merge_threshold_pages = 50 
         self.next_rid = 1
+        self.bufferpool = bufferpool
         
         total_columns = 4 + num_columns
         self.base_pages = [[Page() for _ in range(total_columns)]]
         self.tail_pages = [[Page() for _ in range(total_columns)]]
+
+        for col_idx, page in enumerate(self.base_pages[0]):
+            self._register_page('base', 0, col_idx, page)
+        for col_idx, page in enumerate(self.tail_pages[0]):
+            self._register_page('tail', 0, col_idx, page)
+
+    def _register_page(self, page_type, range_idx, col_idx, page):
+        if self.bufferpool:
+            self.bufferpool.register_page(self.name, page_type, range_idx, col_idx, page)
+
+    def _pin_range(self, page_range):
+        for page in page_range:
+            page.pin_count += 1
+
+    def _unpin_range(self, page_range):
+        for page in page_range:
+            page.pin_count = max(0, page.pin_count - 1)
 
     def __merge(self):
         print("merge is happening")
@@ -134,6 +152,9 @@ class Table:
             total_columns = 4 + self.num_columns
             self.base_pages.append([Page() for _ in range(total_columns)])
             current_page_range = self.base_pages[-1]
+            new_range_idx = len(self.base_pages) - 1
+            for col_idx, page in enumerate(current_page_range):
+                self._register_page('base', new_range_idx, col_idx, page)
         
         current_page_range[INDIRECTION_COLUMN].write(0) 
         current_page_range[RID_COLUMN].write(rid)
@@ -252,6 +273,9 @@ class Table:
 
         if not self.tail_pages[-1][0].has_capacity():
             self.tail_pages.append([Page() for _ in range(4 + self.num_columns)])
+            new_range_idx = len(self.tail_pages) - 1
+            for col_idx, page in enumerate(self.tail_pages[new_range_idx]):
+                self._register_page('tail', new_range_idx, col_idx, page)
         current_tail_range = self.tail_pages[-1]
 
         current_tail_range[INDIRECTION_COLUMN].write(current_indirection)
@@ -267,10 +291,17 @@ class Table:
             current_tail_range[4 + i].write(value)
 
         base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset+8] = tail_rid.to_bytes(8, byteorder='little', signed=True)
+        base_page_range[INDIRECTION_COLUMN].dirty = True
 
         tail_page_range_index = len(self.tail_pages) - 1
         tail_record_index = current_tail_range[0].num_records - 1
         self.page_directory[tail_rid] = ('tail', tail_page_range_index, tail_record_index)
+
+        for i in range(self.num_columns):
+            if self.index.indices[i] is not None and columns[i] is not None:
+                old_val = self._get_latest_column_value(rid, i, current_indirection, base_page_range, base_record_index)
+                self.index.remove_key(i, old_val, rid)
+                self.index.add_to_index(i, columns[i], rid)
 
         return True
     
@@ -278,6 +309,12 @@ class Table:
         if rid not in self.page_directory:
             return False
         
+        for col_idx in range(self.num_columns):
+            if self.index.indices[col_idx] is not None:
+                val = self.get_column_value(rid, col_idx)
+                if val is not None:
+                    self.index.remove_key(col_idx, val, rid)
+            
         del self.page_directory[rid]
         return True
  
