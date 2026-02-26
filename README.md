@@ -13,7 +13,7 @@
 
 ## Milestone 2 Contribution Breakdown 
 
-**Jamie** - 
+**Jamie** - 20% I made sure all files worked together. I implemented a working/initial versions of the dirty page tracking, merge process, and indexing.
 
 **Sabrina** - 20% I contributed to the designing and implementation of bufferpool management class, including the initialization of the frame system, dirty bit tracking, and pin count arrays to manage page storage in memory. 
 
