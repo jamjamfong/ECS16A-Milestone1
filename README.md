@@ -17,7 +17,7 @@
 
 **Sabrina** - 20% I contributed to the designing and implementation of bufferpool management class, including the initialization of the frame system, dirty bit tracking, and pin count arrays to manage page storage in memory. 
 
-**Egnegt** -
+**Egnegt** - 20% I contributed to the TPS tracking. I also helped out with debugging to make sure m2_test_part1.py and m2_test_part2.py ran.
 
 **Maisie** - 20% I contributed to the initial bufferpool.py file and created more functions in the table class. I aided in debugging to ensure test cases were passed.
 
