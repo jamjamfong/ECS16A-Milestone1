@@ -15,7 +15,7 @@
 
 **Jamie** - 
 
-**Sabrina** - 
+**Sabrina** - 20% I contributed to the designing and implementation of bufferpool management class, including the initialization of the frame system, dirty bit tracking, and pin count arrays to manage page storage in memory. 
 
 **Egnegt** -
 
