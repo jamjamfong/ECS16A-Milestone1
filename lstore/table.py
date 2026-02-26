@@ -1,11 +1,17 @@
 from lstore.index import Index
 from lstore.page import Page
 from time import time
+import threading
+import copy
+
 
 INDIRECTION_COLUMN = 0
 RID_COLUMN = 1
 TIMESTAMP_COLUMN = 2
 SCHEMA_ENCODING_COLUMN = 3
+
+BASE_RID_COLUMN = 4
+MERGE_TAIL_PAGE_THRESHOLD = 10
 
 
 class Record:
