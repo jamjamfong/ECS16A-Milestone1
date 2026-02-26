@@ -21,4 +21,4 @@
 
 **Maisie** - 
 
-**Tess** - 
+**Tess** - 20% did the index portion and helped with the merge
