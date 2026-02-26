@@ -9,3 +9,16 @@
 **Maisie** 12.5% I wrote the initial query.py file.
 
 **Tess** 12.5% I wrote the initial index.py file.
+
+
+## Milestone 2 Contribution Breakdown 
+
+**Jamie** - 
+
+**Sabrina** - 
+
+**Egnegt** -
+
+**Maisie** - 
+
+**Tess** - 
