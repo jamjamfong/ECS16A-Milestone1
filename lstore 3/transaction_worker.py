@@ -1,11 +1,7 @@
-import threading
 from lstore.table import Table, Record
 from lstore.index import Index
 
 class TransactionWorker:
-
-    # should never hit this, but safety net
-    MAX_RETRIES = 100
 
     """
     # Creates a transaction worker object.
@@ -28,28 +24,21 @@ class TransactionWorker:
     Runs all transaction as a thread
     """
     def run(self):
-        self._thread = threading.Thread(target=self.__run, daemon=True)
-        self._thread.start()
+        pass
+        # here you need to create a thread and call __run
     
 
     """
     Waits for the worker to finish
     """
     def join(self):
-        if self._thread is not None:
-            self._thread.join()
+        pass
 
 
     def __run(self):
         for transaction in self.transactions:
-            committed = False
-            attempts = 0
-
-            while not committed and attempts < self.MAX_RETRIES:
-                attempts += 1
-                committed = transaction.run()
-
-            self.stats.append(committed)
+            # each transaction returns True if committed or False if aborted
+            self.stats.append(transaction.run())
         # stores the number of transactions that committed
         self.result = len(list(filter(lambda x: x, self.stats)))
 
