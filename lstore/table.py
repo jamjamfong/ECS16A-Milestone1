@@ -76,11 +76,11 @@ class Table:
         from collections import defaultdict
 
         with self._merge_lock:
-            num_ranges = len(self.base_pages)
+            tps_snapshot = list(self.tps)
+            num_ranges = len(tps_snapshot)
             base_snapshot = [[copy.deepcopy(p) for p in r] for r in self.base_pages]
             tail_snapshot = [[copy.deepcopy(p) for p in r] for r in self.tail_pages]
             pd_snapshot = dict(self.page_directory)
-            tps_snapshot = list(self.tps)
 
         for range_idx in range(num_ranges):
             new_range = [copy.deepcopy(p) for p in base_snapshot[range_idx]]

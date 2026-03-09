@@ -9,8 +9,19 @@ class Query:
     Queries that succeed should return the result or True
     Any query that crashes (due to exceptions) should return False
     """
-    def __init__(self, table):
+    def __init__(self, table, lock_manager=None):
         self.table = table
+        self.lock_manager = lock_manager
+    
+    def _acquire_shared(self, transaction, rid):
+        if transaction and self.lock_manager:
+            return self.lock_manager.acquire_shared(transaction, rid)
+        return True
+    
+    def _acquire_exclusive(self, transaction, rid):
+        if transaction and self.lock_manager:
+            return self.lock_manager.acquire_exclusive(transaction, rid)
+        return True
 
     """
     # internal Method
@@ -18,7 +29,7 @@ class Query:
     # Returns True upon succesful deletion
     # Return False if record doesn't exist or is locked due to 2PL
     """
-    def delete(self, primary_key):
+    def delete(self, primary_key, transaction = None):
         try:
             rids = self.table.index.locate(self.table.key, primary_key)
             if not rids or len(rids) == 0:
@@ -34,7 +45,7 @@ class Query:
     # Return True upon succesful insertion
     # Returns False if insert fails for whatever reason
     """
-    def insert(self, *columns):
+    def insert(self, *columns, transaction = None):
         schema_encoding = '0' * self.table.num_columns
         
         try:
@@ -47,6 +58,11 @@ class Query:
             
             rid = self.table.add_base_record(columns, schema_encoding)
             self.table.index.insert_key(columns[self.table.key], rid)
+            if not self._acquire_exclusive(transaction, rid):
+                # Undo the insert immediately
+                self.table.delete_record(rid)
+                return False
+            
             return True
         except Exception:
             return False
@@ -73,11 +89,13 @@ class Query:
     # Returns False if record locked by TPL
     # Assume that select will never be called on a key that doesn't exist
     """
-    def select(self, search_key, search_key_index, projected_columns_index):
+    def select(self, search_key, search_key_index, projected_columns_index, transaction = None):
         try:
             rids = self._locate_rids(search_key, search_key_index)
             results = []
             for rid in rids:
+                if not self._acquire_shared(transaction, rid):
+                    return False 
                 data = self.table.get_record_data(rid, projected_columns_index)
                 if data is not None:
                     actual_pk = self.table.get_column_value(rid, self.table.key)
@@ -96,11 +114,13 @@ class Query:
     # Returns False if record locked by TPL
     # Assume that select will never be called on a key that doesn't exist
     """
-    def select_version(self, search_key, search_key_index, projected_columns_index, relative_version):
+    def select_version(self, search_key, search_key_index, projected_columns_index, relative_version, transaction = None):
         try:
             rids = self._locate_rids(search_key, search_key_index)
             results = []
             for rid in rids:
+                if not self._acquire_shared(transaction, rid):
+                    return False
                 data = self.table.get_version_data(rid, projected_columns_index, relative_version)
                 if data is not None:
                     actual_pk = self.table.get_column_value(rid, self.table.key)
@@ -114,7 +134,7 @@ class Query:
     # Returns True if update is succesful
     # Returns False if no records exist with given key or if the target record cannot be accessed due to 2PL locking
     """
-    def update(self, primary_key, *columns):
+    def update(self, primary_key, *columns, transaction = None):
         try:
             if len(columns) != self.table.num_columns:
                 return False
@@ -126,6 +146,8 @@ class Query:
                 return False
             
             rid = rids[0]
+            if not self._acquire_exclusive(transaction, rid):
+                return False
             return self.table.update_record(rid, columns)
         except Exception:
             return False
@@ -138,7 +160,7 @@ class Query:
     # Returns the summation of the given range upon success
     # Returns False if no record exists in the given range
     """
-    def sum(self, start_range, end_range, aggregate_column_index):
+    def sum(self, start_range, end_range, aggregate_column_index, transaction=None):
         try:
             total = 0
             found = False
@@ -146,6 +168,8 @@ class Query:
                 rids = self.table.index.locate(self.table.key, key)
                 if rids:
                     rid = rids[0]
+                    if not self._acquire_shared(transaction, rid):
+                        return False
                     val = self.table.get_column_value(rid, aggregate_column_index)
                     total += val
                     found = True

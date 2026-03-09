@@ -9,7 +9,9 @@ class Transaction:
     def __init__(self):
         self.queries = [] # Queued operations
         self._undo_log = [] # Data that needs to roll back
-        self._locked_records = set() # Locks
+        self.held_locks = {}
+        self.lock_manager = None
+        #self._locked_records = set() # Locks
 
     """
     # Adds the given query to this transaction
@@ -27,6 +29,7 @@ class Transaction:
     # Execute queued queries in sequence. Before writing a query, it prepares rollback info. If query returns false, it will call abort(). If successful it calls commit()
     def run(self):
         self._undo_log = []
+        self.held_locks = {}
         for query, table, args in self.queries:
             query_name = getattr(query, "__name__", "")
             undo_entry = None
@@ -42,7 +45,7 @@ class Transaction:
                     if before_image is not None:
                         undo_entry = (query_name, table, before_image)
 
-            result = query(*args)
+            result = query(*args, transaction = self)
 
             # If the query has failed the transaction should abort
             if result == False:
@@ -53,6 +56,8 @@ class Transaction:
 
     # Replays undo log in reverse to abort commits
     def abort(self):
+        if self.lock_manager:
+            self.lock_manager.release_all(self)
         for op_type, table, payload in reversed(self._undo_log):
             if op_type == "insert":
                 key = payload
@@ -77,11 +82,11 @@ class Transaction:
                         table.index.add_to_index(col_idx, previous_values[col_idx], rid)
 
         self._undo_log = []
-        self._locked_records.clear()
         return False
 
     # Clears temporary state
     def commit(self):
+        if self.lock_manager:
+            self.lock_manager.release_all(self)
         self._undo_log = []
-        self._locked_records.clear()
         return True
