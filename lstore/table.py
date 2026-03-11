@@ -46,6 +46,7 @@ class Table:
         self._merge_lock = threading.Lock()
         self._merge_thread = None
         self._updates_since_merge = 0
+        self._table_lock = threading.Lock()
 
         for col_idx, page in enumerate(self.base_pages[0]):
             self._register_page('base', 0, col_idx, page)
@@ -240,8 +241,9 @@ class Table:
         )
 
     def add_base_record(self, columns, schema_encoding):
-        rid = self.next_rid
-        self.next_rid += 1
+        with self._table_lock:
+            rid = self.next_rid
+            self.next_rid += 1 
         current_page_range = self.base_pages[-1]
 
         if not current_page_range[0].has_capacity():
@@ -264,7 +266,8 @@ class Table:
 
         page_range_index = len(self.base_pages) - 1
         record_index = current_page_range[0].num_records - 1
-        self.page_directory[rid] = ('base', page_range_index, record_index)
+        with self._table_lock:
+            self.page_directory[rid] = ('base', page_range_index, record_index)
 
         return rid
 
@@ -364,8 +367,9 @@ class Table:
                 schema_bits[i] = '1'
         schema_encoding_val = int(''.join(schema_bits[::-1]), 2)
 
-        tail_rid = self.next_rid
-        self.next_rid += 1
+        with self._table_lock:
+            tail_rid = self.next_rid
+            self.next_rid += 1
 
         if not self.tail_pages[-1][0].has_capacity():
             self.tail_pages.append([Page() for _ in range(5 + self.num_columns)])
@@ -395,7 +399,8 @@ class Table:
 
         tail_page_range_index = len(self.tail_pages) - 1
         tail_record_index = current_tail_range[0].num_records - 1
-        self.page_directory[tail_rid] = ('tail', tail_page_range_index, tail_record_index)
+        with self._table_lock:
+            self.page_directory[tail_rid] = ('tail', tail_page_range_index, tail_record_index)
         if len(self.tail_pages) >= MERGE_TAIL_PAGE_THRESHOLD:
             self._trigger_merge()
 
@@ -409,6 +414,7 @@ class Table:
                 val = self.get_column_value(rid, col_idx)
                 if val is not None:
                     self.index.remove_key(col_idx, val, rid)
-
-        del self.page_directory[rid]
+        
+        with self._table_lock:
+            del self.page_directory[rid]
         return True
