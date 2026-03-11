@@ -6,11 +6,11 @@ class Transaction:
     """
     # Creates a transaction object.
     """
-    def __init__(self):
+    def __init__(self, lock_manager=None):
         self.queries = [] # Queued operations
         self._undo_log = [] # Data that needs to roll back
         self.held_locks = {}
-        self.lock_manager = None
+        self.lock_manager = lock_manager
         #self._locked_records = set() # Locks
 
     """
@@ -34,9 +34,7 @@ class Transaction:
             query_name = getattr(query, "__name__", "")
             undo_entry = None
 
-            if query_name == "insert":
-                undo_entry = ("insert", table, args[table.key])
-            elif query_name in ("update", "delete"):
+            if query_name in ("update", "delete"):
                 primary_key = args[0]
                 rids = table.index.locate(table.key, primary_key)
                 if rids:
@@ -45,13 +43,17 @@ class Transaction:
                     if before_image is not None:
                         undo_entry = (query_name, table, before_image)
 
-            result = query(*args, transaction = self)
+            result = query(*args, transaction=self)
 
-            # If the query has failed the transaction should abort
             if result == False:
                 return self.abort()
+            
+            if query_name == "insert":
+                undo_entry = ("insert", table, args[table.key])
+            
             if undo_entry is not None:
                 self._undo_log.append(undo_entry)
+
         return self.commit()
 
     # Replays undo log in reverse to abort commits
@@ -76,7 +78,8 @@ class Transaction:
                     table.update_record(rids[0], restored_columns)
             elif op_type == "delete":
                 previous_values = payload
-                rid = table.add_base_record(previous_values, '0' * table.num_columns)
+                schema_encoding = '0' * table.num_columns
+                rid = table.add_base_record(previous_values, schema_encoding)
                 for col_idx in range(table.num_columns):
                     if table.index.indices[col_idx] is not None:
                         table.index.add_to_index(col_idx, previous_values[col_idx], rid)
