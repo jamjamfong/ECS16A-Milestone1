@@ -36,6 +36,8 @@ class Query:
                 return False
                 
             rid = rids[0]
+            if not self._acquire_exclusive(transaction, rid):
+                return False
             return self.table.delete_record(rid)
         except Exception:
             return False
@@ -57,11 +59,11 @@ class Query:
                 return False
             
             rid = self.table.add_base_record(columns, schema_encoding)
-            self.table.index.insert_key(columns[self.table.key], rid)
+
             if not self._acquire_exclusive(transaction, rid):
-                # Undo the insert immediately
                 self.table.delete_record(rid)
                 return False
+            self.table.index.insert_key(columns[self.table.key], rid)
             
             return True
         except Exception:
