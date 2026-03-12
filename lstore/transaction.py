@@ -31,6 +31,9 @@ class Transaction:
         self._undo_log = []
         self.held_locks = {}
         for query, table, args in self.queries:
+            if self.lock_manager is None:
+                self.lock_manager = table.lock_manager
+
             query_name = getattr(query, "__name__", "")
             undo_entry = None
 

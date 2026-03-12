@@ -5,16 +5,15 @@ from lstore.index import Index
 class TransactionWorker:
 
     # should never hit this, but safety net
-    MAX_RETRIES = 100
+    MAX_RETRIES = 1000
 
     """
     # Creates a transaction worker object.
     """
-    def __init__(self, transactions = []):
+    def __init__(self, transactions = None):
         self.stats = []
-        self.transactions = transactions
+        self.transactions = transactions if transactions is not None else []
         self.result = 0
-        pass
 
     
     """

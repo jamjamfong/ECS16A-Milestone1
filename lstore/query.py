@@ -11,7 +11,7 @@ class Query:
     """
     def __init__(self, table, lock_manager=None):
         self.table = table
-        self.lock_manager = lock_manager
+        self.lock_manager = lock_manager if lock_manager is not None else table.lock_manager
     
     def _acquire_shared(self, transaction, rid):
         if transaction and self.lock_manager:

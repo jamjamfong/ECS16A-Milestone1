@@ -1,5 +1,6 @@
 from lstore.index import Index
 from lstore.page import Page
+from lstore.lock_manager import LockManager
 from time import time
 import threading
 import copy
@@ -19,6 +20,14 @@ class Record:
         self.rid = rid
         self.key = key
         self.columns = columns
+
+    def __eq__(self, other):
+        if isinstance(other, list):
+            return self.columns == other
+        return self.columns == other.columns
+
+    def __repr__(self):
+        return str(self.columns)
 
 
 class Table:
@@ -48,6 +57,8 @@ class Table:
         self._updates_since_merge = 0
         self._table_lock = threading.Lock()
 
+        self.lock_manager = LockManager()
+
         for col_idx, page in enumerate(self.base_pages[0]):
             self._register_page('base', 0, col_idx, page)
         for col_idx, page in enumerate(self.tail_pages[0]):
@@ -76,12 +87,13 @@ class Table:
     def _merge(self):
         from collections import defaultdict
 
-        with self._merge_lock:
+        with self._table_lock:
             tps_snapshot = list(self.tps)
             num_ranges = len(tps_snapshot)
-            base_snapshot = [[copy.deepcopy(p) for p in r] for r in self.base_pages]
-            tail_snapshot = [[copy.deepcopy(p) for p in r] for r in self.tail_pages]
             pd_snapshot = dict(self.page_directory)
+        
+        base_snapshot = [[copy.deepcopy(p) for p in r] for r in self.base_pages]
+        tail_snapshot = [[copy.deepcopy(p) for p in r] for r in self.tail_pages]
 
         for range_idx in range(num_ranges):
             new_range = [copy.deepcopy(p) for p in base_snapshot[range_idx]]
@@ -243,30 +255,31 @@ class Table:
     def add_base_record(self, columns, schema_encoding):
         with self._table_lock:
             rid = self.next_rid
-            self.next_rid += 1 
-        current_page_range = self.base_pages[-1]
+            self.next_rid += 1
 
-        if not current_page_range[0].has_capacity():
-            total_columns = 5 + self.num_columns
-            self.base_pages.append([Page() for _ in range(total_columns)])
-            self.tps.append(0)
+            # CHANGE: capacity check and record_index capture inside the lock
             current_page_range = self.base_pages[-1]
-            new_range_idx = len(self.base_pages) - 1
-            for col_idx, page in enumerate(current_page_range):
-                self._register_page('base', new_range_idx, col_idx, page)
+            if not current_page_range[0].has_capacity():
+                total_columns = 5 + self.num_columns
+                self.base_pages.append([Page() for _ in range(total_columns)])
+                self.tps.append(0)
+                current_page_range = self.base_pages[-1]
+                new_range_idx = len(self.base_pages) - 1
+                for col_idx, page in enumerate(current_page_range):
+                    self._register_page('base', new_range_idx, col_idx, page)
 
-        current_page_range[INDIRECTION_COLUMN].write(0)
-        current_page_range[RID_COLUMN].write(rid)
-        current_page_range[TIMESTAMP_COLUMN].write(int(time()))
-        current_page_range[SCHEMA_ENCODING_COLUMN].write(int(schema_encoding, 2))
-        current_page_range[BASE_RID_COLUMN].write(rid)
+            record_index = current_page_range[0].num_records
+            page_range_index = len(self.base_pages) - 1
 
-        for i, value in enumerate(columns):
-            current_page_range[5 + i].write(value)
+            current_page_range[INDIRECTION_COLUMN].write(0)
+            current_page_range[RID_COLUMN].write(rid)
+            current_page_range[TIMESTAMP_COLUMN].write(int(time()))
+            current_page_range[SCHEMA_ENCODING_COLUMN].write(int(schema_encoding, 2))
+            current_page_range[BASE_RID_COLUMN].write(rid)
 
-        page_range_index = len(self.base_pages) - 1
-        record_index = current_page_range[0].num_records - 1
-        with self._table_lock:
+            for i, value in enumerate(columns):
+                current_page_range[5 + i].write(value)
+
             self.page_directory[rid] = ('base', page_range_index, record_index)
 
         return rid
@@ -371,40 +384,46 @@ class Table:
             tail_rid = self.next_rid
             self.next_rid += 1
 
-        if not self.tail_pages[-1][0].has_capacity():
-            self.tail_pages.append([Page() for _ in range(5 + self.num_columns)])
-            new_range_idx = len(self.tail_pages) - 1
-            for col_idx, page in enumerate(self.tail_pages[new_range_idx]):
-                self._register_page('tail', new_range_idx, col_idx, page)
+            if not self.tail_pages[-1][0].has_capacity():
+                self.tail_pages.append([Page() for _ in range(5 + self.num_columns)])
+                new_range_idx = len(self.tail_pages) - 1
+                for col_idx, page in enumerate(self.tail_pages[new_range_idx]):
+                    self._register_page('tail', new_range_idx, col_idx, page)
 
-        current_tail_range = self.tail_pages[-1]
+            current_tail_range = self.tail_pages[-1]
+            tail_page_range_index = len(self.tail_pages) - 1
+            tail_record_index = current_tail_range[0].num_records
 
-        current_tail_range[INDIRECTION_COLUMN].write(current_indirection)
-        current_tail_range[RID_COLUMN].write(tail_rid)
-        current_tail_range[TIMESTAMP_COLUMN].write(int(time()))
-        current_tail_range[SCHEMA_ENCODING_COLUMN].write(schema_encoding_val)
-        current_tail_range[BASE_RID_COLUMN].write(rid)
+            for page in current_tail_range:
+                page.num_records += 1 
 
+        def write_slot(page, idx, value):
+            offset = idx * 8
+            page.data[offset:offset + 8] = value.to_bytes(8, byteorder='little', signed=True)
+            page.dirty = True
+
+        write_slot(current_tail_range[INDIRECTION_COLUMN], tail_record_index, current_indirection)
+        write_slot(current_tail_range[RID_COLUMN], tail_record_index, tail_rid)
+        write_slot(current_tail_range[TIMESTAMP_COLUMN], tail_record_index, int(time()))
+        write_slot(current_tail_range[SCHEMA_ENCODING_COLUMN], tail_record_index, schema_encoding_val)
+        write_slot(current_tail_range[BASE_RID_COLUMN], tail_record_index, rid)
+        
         for i in range(self.num_columns):
             if columns[i] is not None:
                 value = columns[i]
             else:
                 value = self._get_latest_column_value(rid, i, current_indirection, base_page_range, base_record_index)
-            current_tail_range[5 + i].write(value)
-        with self._merge_lock:
+            write_slot(current_tail_range[5 + i], tail_record_index, value)
+
+        with self._table_lock:
             current_base_page_range = self.base_pages[base_page_range_index]
             current_base_page_range[INDIRECTION_COLUMN].data[base_offset:base_offset + 8] = \
-                tail_rid.to_bytes(8, byteorder='little', signed=True)
+            tail_rid.to_bytes(8, byteorder='little', signed=True)
             current_base_page_range[INDIRECTION_COLUMN].dirty = True
-
-        tail_page_range_index = len(self.tail_pages) - 1
-        tail_record_index = current_tail_range[0].num_records - 1
-        with self._table_lock:
             self.page_directory[tail_rid] = ('tail', tail_page_range_index, tail_record_index)
-        if len(self.tail_pages) >= MERGE_TAIL_PAGE_THRESHOLD:
-            self._trigger_merge()
 
         return True
+
     def delete_record(self, rid):
         if rid not in self.page_directory:
             return False
