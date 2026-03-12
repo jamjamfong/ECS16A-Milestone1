@@ -31,7 +31,7 @@
 
 **Sabrina** -  20% I implemented the transaction.py file such that it folows ACID properties.
 
-**Egnegt** - 
+**Egnegt** - 20% I debugged Concurrency Control and made sure it worked with other classes and files.
 
 **Maisie** - 20% I contributed to the transaction_worker.py file.
 
