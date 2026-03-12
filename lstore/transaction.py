@@ -37,23 +37,27 @@ class Transaction:
             query_name = getattr(query, "__name__", "")
             undo_entry = None
 
+            
             if query_name in ("update", "delete"):
                 primary_key = args[0]
                 rids = table.index.locate(table.key, primary_key)
                 if rids:
                     rid = rids[0]
+                    if not self.lock_manager.acquire_exclusive(self, rid):
+                        return self.abort()
                     before_image = table.get_record_data(rid, [1] * table.num_columns)
                     if before_image is not None:
                         undo_entry = (query_name, table, before_image)
 
+            
             result = query(*args, transaction=self)
 
             if result == False:
                 return self.abort()
-            
+
             if query_name == "insert":
                 undo_entry = ("insert", table, args[table.key])
-            
+
             if undo_entry is not None:
                 self._undo_log.append(undo_entry)
 
