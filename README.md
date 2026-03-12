@@ -22,3 +22,17 @@
 **Maisie** - 20% I contributed to the initial bufferpool.py file and created more functions in the table class. I aided in debugging to ensure test cases were passed.
 
 **Tess** - 20% did the index portion and helped with the merge
+
+
+
+## Milestone 3 Contribution Breakdown 
+
+**Jamie** - 20% I did the query.py file and made edits to all file to ensure implementation passed tests
+
+**Sabrina** -  
+
+**Egnegt** - 
+
+**Maisie** - 
+
+**Tess** - 
