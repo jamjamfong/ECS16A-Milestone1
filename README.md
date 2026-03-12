@@ -29,7 +29,7 @@
 
 **Jamie** - 20% I did the query.py file and made edits to all file to ensure implementation passed tests
 
-**Sabrina** -  
+**Sabrina** -  20% I implemented the transaction.py file such that it folows ACID properties.
 
 **Egnegt** - 
 
