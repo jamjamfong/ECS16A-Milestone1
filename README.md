@@ -33,6 +33,6 @@
 
 **Egnegt** - 
 
-**Maisie** - 
+**Maisie** - I contributed to the transaction_worker.py file.
 
-**Tess** - 
+**Tess** - 20% I did the base part of the Concurrency Control
